@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/mastersb/monkey/evaluator"
 	"github.com/mastersb/monkey/lexer"
@@ -12,6 +13,7 @@ import (
 )
 
 const PROMPT = ">> "
+const CONT_PROMPT = "... "
 
 const MONKEY_FACE = `            __,__
    .--.  .-"     "-.  .--.
@@ -29,23 +31,40 @@ const MONKEY_FACE = `            __,__
 func Start(in io.Reader, out io.Writer) {
 	scanner := bufio.NewScanner(in)
 	env := object.NewEnvironment()
+	var input strings.Builder
+	prompt := PROMPT
 
 	for {
-		fmt.Fprintf(out, PROMPT)
+		fmt.Fprintf(out, prompt)
 		scanned := scanner.Scan()
 		if !scanned {
 			return
 		}
 
 		line := scanner.Text()
-		l := lexer.New(line)
-		p := parser.New(l)
+		input.WriteString(line)
+		input.WriteString("\n")
 
-		program := p.ParseProgram()
-		if len(p.Errors()) != 0 {
-			printParserErrors(out, p.Errors())
+		source := input.String()
+
+		if !isBraceBalanced(source) {
+			prompt = CONT_PROMPT
 			continue
 		}
+
+		l := lexer.New(source)
+		p := parser.New(l)
+		program := p.ParseProgram()
+
+		if len(p.Errors()) != 0 {
+			printParserErrors(out, p.Errors())
+			prompt = PROMPT
+			input.Reset()
+			continue
+		}
+
+		input.Reset()
+		prompt = PROMPT
 
 		evaluated := evaluator.Eval(program, env)
 		if evaluated != nil {
@@ -53,6 +72,53 @@ func Start(in io.Reader, out io.Writer) {
 			io.WriteString(out, "\n")
 		}
 	}
+}
+
+func isBraceBalanced(source string) bool {
+	braces := 0
+	brackets := 0
+	parens := 0
+
+	inString := false
+	escaped := false
+
+	for _, ch := range source {
+		if escaped {
+			escaped = false
+			continue
+		}
+
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+
+		if inString {
+			continue
+		}
+
+		switch ch {
+		case '{':
+			braces++
+		case '}':
+			braces--
+		case '[':
+			brackets++
+		case ']':
+			brackets--
+		case '(':
+			parens++
+		case ')':
+			parens--
+		}
+	}
+
+	return braces == 0 && brackets == 0 && parens == 0
 }
 
 func printParserErrors(out io.Writer, errors []string) {
